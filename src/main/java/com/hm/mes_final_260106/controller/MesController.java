@@ -29,15 +29,21 @@ public class MesController {
         return ResponseEntity
                 .ok(productionService.inboundMaterial(dto.getCode(), dto.getName(), dto.getAmount()));
     }
-    @GetMapping("/materials")
-    public ResponseEntity<List<Material>> getAllMaterials() {
+
+    // Dashboard : 자재 재고 조회 API
+    @GetMapping("/materials/stock")
+    public ResponseEntity<List<Material>> getMaterialStock() {
         return ResponseEntity.ok(productionService.getMaterialStock());
     }
+
+    // 작업 지시 생성 API : 계획 입력(React) -> DB에 레코드 추가 -> 반환(DTO) -> 대시보드에 현재상태가 WAIT로 표시되면서 작업이 등록됨
     @PostMapping("/order")
     public ResponseEntity<WorkOrderResDto> createOrder(@RequestBody WorkOrderDto dto) {
         WorkOrder order = productionService.createWorkOrder(dto.getProductCode(), dto.getTargetQty());
         return ResponseEntity.ok(WorkOrderResDto.fromEntity(order));
     }
+
+    // Dashboard : 작업 지시 목록 조회 API
     @GetMapping("/orders")
     public ResponseEntity<List<WorkOrderResDto>> getAllOrders() {
         List<WorkOrderResDto> dtos = productionService.getAllWorkOrders()
@@ -47,13 +53,15 @@ public class MesController {
         return ResponseEntity.ok(dtos);
     }
 
-    // --- [Machine / PLC API] ---
+    // Machine : 설비 작업 할당
     @GetMapping("/machine/poll")
     public ResponseEntity<WorkOrderResDto> pollWork(@RequestParam String machineId) {
         WorkOrder work = productionService.assignWorkToMachine(machineId);
         return (work != null) ? ResponseEntity.ok(WorkOrderResDto.fromEntity(work))
                 : ResponseEntity.noContent().build();
     }
+
+    // Machine : 생산 결과 보고
     @PostMapping("/machine/report")
     public ResponseEntity<String> reportProduction(@RequestBody ProductionReportDto dto) {
         productionService.reportProduction(dto.getOrderId(), dto.getMachineId(),
