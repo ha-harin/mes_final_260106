@@ -3,6 +3,7 @@ import com.hm.mes_final_260106.entity.Bom;
 import com.hm.mes_final_260106.entity.Material;
 import com.hm.mes_final_260106.entity.ProductionLog;
 import com.hm.mes_final_260106.entity.WorkOrder;
+import com.hm.mes_final_260106.exception.CustomException;
 import com.hm.mes_final_260106.repository.BomRepository;
 import com.hm.mes_final_260106.repository.MaterialRepository;
 import com.hm.mes_final_260106.repository.ProductionLogRepository;
@@ -61,6 +62,9 @@ public class ProductionService {
                     if (waiting != null) {
                         waiting.setStatus("IN_PROGRESS");
                         waiting.setAssignedMachineId(machineId); // save()를 명시하지 않아도 변경 감지로 인해 업데이트됨
+                        if (!isMaterialAvailable(waiting.getProductCode())) {
+                            return null; // 자재가 없으면 할당하지 않음 (C#은 NoContent 응답을 받음)
+                        }
                     }
                     return waiting;
                 });
@@ -91,9 +95,22 @@ public class ProductionService {
             List<Bom> boms = bomRepo.findAllByProductCode(order.getProductCode());
             for (Bom bom : boms) {
                 Material mat = bom.getMaterial();
-                // DB에서 가져온 엔티티의 수치를 바로 변경
-                mat.setCurrentStock(mat.getCurrentStock() - bom.getRequiredQty());
+                int required = bom.getRequiredQty();
+                int current = mat.getCurrentStock();
+
+                // [핵심 추가] 차감 전 재고 확인
+                if (current < required) {
+                    // 자재가 부족하면 예외를 던져 전체 프로세스를 롤백시킵니다.
+                    // 메시지에 부족한 자재명을 담아 설비나 UI에 알릴 수 있습니다.
+                    throw new CustomException("SHORTAGE", "MATERIAL_SHORTAGE:" + mat.getName());
+                }
+
+                // 재고가 충분할 때만 차감 실행
+                mat.setCurrentStock(current - required);
+                log.info("[Backflushing] 자재: {}, 차감후 재고: {}", mat.getName(), mat.getCurrentStock());
             }
+        } else {
+            log.info("생산 불량 !!!!, 자재 차감 하지 않음");
         }
 
         // 수량 업데이트
@@ -117,5 +134,18 @@ public class ProductionService {
     // 전체 자재 재고량
     public List<Material> getMaterialStock(){
         return matRepo.findAll();
+    }
+    // 자재 현황 체크 로직
+    private boolean isMaterialAvailable(String productCode) {
+        List<Bom> boms = bomRepo.findAllByProductCode(productCode);
+        for (Bom bom : boms) {
+            // 현재 재고 < 1개 생산 당 소요량 이면 생산 불가
+            if (bom.getMaterial().getCurrentStock() < bom.getRequiredQty()) {
+                log.error("자재 부족: {} (현재: {}, 필요: {})",
+                        bom.getMaterial().getName(), bom.getMaterial().getCurrentStock(), bom.getRequiredQty());
+                return false;
+            }
+        }
+        return true;
     }
 }
